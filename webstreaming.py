@@ -2,16 +2,24 @@ from flask import Response, Flask, render_template
 from multiprocessing import Process, Manager
 import time
 import cv2
+import logging
+
+main_logger: logging.Logger = logging.getLogger("камера")
+main_logger.setLevel(logging.INFO)
+log_handler = logging.FileHandler("log.log", mode='w')
+log_formatter = logging.Formatter("%(asctime)s %(message)s")
+log_handler.setFormatter(log_formatter)
+main_logger.addHandler(log_handler)
 
 app: Flask = Flask(__name__)
-source: str = "rtsp://admin:password@192.168.0.119:10554/tcp/av0_1"  # Источник видео
+source: str = "rtsp://admin:password@192.168.0.119:10554/tcp/av0_1"
 
 
 def cache_frames(source: str, last_frame: list, running) -> None:
     """ Кэширование кадров """
     cap = cv2.VideoCapture(source)
-    #cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)  #в некоторых случаях это позволяет избавится от старых кадров
-    fps = cap.get(cv2.CAP_PROP_FPS)
+    #cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)  # в некоторых случаях это позволяет избавится от старых кадров
+    interval = 1 / cap.get(cv2.CAP_PROP_FPS) + 3  # Интервал между кадрами
     while running.value:
         ret, frame = cap.read()  # Чтение кадра
         if ret:  # Если кадр считан
@@ -19,9 +27,13 @@ def cache_frames(source: str, last_frame: list, running) -> None:
             _, buffer = cv2.imencode('.jpg', frame,
                                      [int(cv2.IMWRITE_JPEG_QUALITY), 85])  # Кодирование кадра в JPEG
             last_frame[0] = buffer.tobytes()  # Кэширование кадра
+            time.sleep(interval)
         else:
-            break  # Если не удалось захватить кадр
-        time.sleep(1 / (fps+1))  # Интервал между кадрами
+            # Если не удалось захватить кадр
+            main_logger.error("Не удалось захватить кадр, попробуйте проверить источник видеопотока.")
+            cap.release()
+            time.sleep(2)
+            cap = cv2.VideoCapture(source)  # Повторное открытие камеры
     cap.release()
 
 
